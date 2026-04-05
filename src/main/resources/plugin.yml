@@ -1,0 +1,34 @@
+name: Personality
+version: '${project.version}'
+main: dev.personality.PersonalityPlugin
+api-version: '1.21'
+description: Player profile and reputation system
+authors:
+  - Author
+
+softdepend:
+  - PlaceholderAPI
+  - DiscordSRV
+
+commands:
+  personality:
+    description: Open a player's profile
+    usage: /<command> <player>
+    permission: playerinfo.use
+    aliases:
+      - profile
+      - playerinfo
+  reputation:
+    description: Reputation system commands
+    usage: /<command> top
+    permission: playerinfo.use
+    aliases:
+      - rep
+
+permissions:
+  playerinfo.use:
+    description: Allows using the Personality plugin
+    default: true
+  playerinfo.admin:
+    description: Admin access to the Personality plugin
+    default: op

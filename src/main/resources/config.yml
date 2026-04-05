@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────
+#  Personality Plugin  —  config.yml
+#  Text fields support MiniMessage: https://docs.advntr.dev/minimessage/format.html
+# ─────────────────────────────────────────────────────────────────
+
+# ── GUI Titles & Slot Layout ────────────────────────────────────
+gui:
+  profile-title: "<dark_gray>Profile: <white>{player}"
+  reputation-title: "<dark_gray>Reputation: <white>{player}"
+  top-title: "<gold><bold>Top Players"
+
+  # Slot indices for the 27-slot (3-row) Profile inventory.
+  # All unspecified slots are filled with gray glass panes automatically.
+  profile-slots:
+    player-head:        4
+    first-join:         10
+    playtime:           11
+    likes:              12
+    reputation:         13
+    dislikes:           14
+    discord:            15
+    reputation-button:  22
+
+  # Slot indices for the 27-slot Reputation inventory.
+  reputation-slots:
+    like-button:    11
+    current-vote:   13
+    dislike-button: 15
+    back-button:    22
+
+# ── Stats Visibility ─────────────────────────────────────────────
+stats:
+  show-first-join: true
+  show-playtime:   true
+  show-reputation: true
+  show-discord:    true
+
+# ── PlaceholderAPI ───────────────────────────────────────────────
+placeholder:
+  # Placeholder used to resolve the player's linked Discord username.
+  # Requires DiscordSRV + PlaceholderAPI to be installed.
+  discord: "%discordsrv_username%"
+
+# ── Mask Detection ───────────────────────────────────────────────
+# If a player is "masked", their profile cannot be opened.
+mask:
+  # Check for Bukkit metadata with the given key.
+  check-metadata: true
+  metadata-key: "masked"
+
+  # Optionally use a PlaceholderAPI placeholder for mask detection.
+  use-placeholder: false
+  placeholder: "%your_mask_placeholder%"
+  # The exact string value that means "masked".
+  placeholder-masked-value: "true"
+
+# ── Sounds ──────────────────────────────────────────────────────
+# Use Bukkit Sound enum names: https://jd.papermc.io/paper/1.21/org/bukkit/Sound.html
+sounds:
+  like:         ENTITY_PLAYER_LEVELUP
+  dislike:      ENTITY_VILLAGER_NO
+  open-profile: BLOCK_CHEST_OPEN
+
+# ── Messages ────────────────────────────────────────────────────
+# All messages support MiniMessage. Use "" to disable a message.
+messages:
+  cannot-vote-self: "<red>You cannot vote for yourself!"
+  vote-like:        "<green>You liked <white>{player}<green>!"
+  vote-dislike:     "<red>You disliked <white>{player}<red>!"
+  vote-unchanged:   "<yellow>Your vote is already recorded."
+  player-not-found: "<red>Player not found: <white>{player}"
+  no-permission:    "<red>You don't have permission to do this."
+
+# ── Vote Logging ─────────────────────────────────────────────────
+vote-log:
+  enabled: false
+  # Path relative to the plugin data folder.
+  file: "vote-log.txt"
