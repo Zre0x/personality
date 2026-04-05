@@ -15,9 +15,7 @@ gui:
     player-head:        4
     first-join:         10
     playtime:           11
-    likes:              12
     reputation:         13
-    dislikes:           14
     discord:            15
     reputation-button:  22
 

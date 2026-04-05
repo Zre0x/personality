@@ -26,17 +26,15 @@ import java.util.concurrent.CompletableFuture;
  * <p>Layout (default slot assignments — all configurable in config.yml):</p>
  * <pre>
  *  [ ][ ][ ][ ][H][ ][ ][ ][ ]
- *  [ ][FJ][PT][L][S][D][DC][ ][ ]
+ *  [ ][FJ][PT][ ][S][ ][DC][ ][ ]
  *  [ ][ ][ ][ ][R][ ][ ][ ][ ]
  *
  *  H  = Player head
  *  FJ = First join
  *  PT = Playtime
- *  L  = Total likes
  *  S  = Reputation score
- *  D  = Total dislikes
  *  DC = Discord username
- *  R  = Open reputation menu
+ *  R  = Open reputation menu (likes/dislikes detail shown there)
  *  [ ] = Gray glass pane (filler)
  * </pre>
  */
@@ -129,31 +127,15 @@ public final class ProfileGUI {
                     .build());
         }
 
-        // ── Reputation ────────────────────────────────────────────
+        // ── Reputation score (likes/dislikes detail available in ReputationGUI) ──
         if (plugin.getConfig().getBoolean("stats.show-reputation", true)) {
-            int likes    = counts[0];
-            int dislikes = counts[1];
-            int score    = likes - dislikes;
+            int score = counts[0] - counts[1];
             String scoreColor = score >= 0 ? "<green>" : "<red>";
-
-            int lSlot = plugin.getConfig().getInt("gui.profile-slots.likes", 12);
-            inv.setItem(lSlot, new ItemBuilder(Material.LIME_DYE)
-                    .name(MM.deserialize("<green>Likes"))
-                    .lore(List.of(MM.deserialize("<white>" + likes)))
-                    .hideFlags()
-                    .build());
 
             int rSlot = plugin.getConfig().getInt("gui.profile-slots.reputation", 13);
             inv.setItem(rSlot, new ItemBuilder(Material.NETHER_STAR)
                     .name(MM.deserialize("<yellow>Reputation Score"))
                     .lore(List.of(MM.deserialize(scoreColor + score)))
-                    .hideFlags()
-                    .build());
-
-            int dSlot = plugin.getConfig().getInt("gui.profile-slots.dislikes", 14);
-            inv.setItem(dSlot, new ItemBuilder(Material.RED_DYE)
-                    .name(MM.deserialize("<red>Dislikes"))
-                    .lore(List.of(MM.deserialize("<white>" + dislikes)))
                     .hideFlags()
                     .build());
         }
