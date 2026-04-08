@@ -127,15 +127,16 @@ public final class ProfileGUI {
                     .build());
         }
 
-        // ── Reputation score (likes/dislikes detail available in ReputationGUI) ──
+        // ── Reputation score ──────────────────────────────────────
         if (plugin.getConfig().getBoolean("stats.show-reputation", true)) {
-            int score = counts[0] - counts[1];
+            int score = counts[0]; // counts[0] is now the numeric score directly
             String scoreColor = score >= 0 ? "<green>" : "<red>";
+            String scoreStr   = (score >= 0 ? "+" : "") + score;
 
             int rSlot = plugin.getConfig().getInt("gui.profile-slots.reputation", 13);
             inv.setItem(rSlot, new ItemBuilder(Material.NETHER_STAR)
-                    .name(MM.deserialize("<yellow>Reputation Score"))
-                    .lore(List.of(MM.deserialize(scoreColor + score)))
+                    .name(MM.deserialize("<yellow>Репутация"))
+                    .lore(List.of(MM.deserialize(scoreColor + scoreStr)))
                     .hideFlags()
                     .build());
         }

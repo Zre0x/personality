@@ -24,6 +24,10 @@ commands:
     permission: playerinfo.use
     aliases:
       - rep
+  repadmin:
+    description: Admin reputation management
+    usage: /<command> <set|add|reset|info|syncall|reload> [player] [value]
+    permission: playerinfo.admin
 
 permissions:
   playerinfo.use:

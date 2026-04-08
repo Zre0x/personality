@@ -4,7 +4,7 @@ import dev.personality.PersonalityPlugin;
 import dev.personality.gui.PersonalityHolder;
 import dev.personality.gui.ProfileGUI;
 import dev.personality.gui.ReputationGUI;
-import dev.personality.manager.ReputationManager.VoteResult;
+import dev.personality.manager.ReputationManager.RepResult;
 import dev.personality.model.VoteType;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
@@ -20,35 +20,22 @@ import org.bukkit.inventory.Inventory;
 
 import java.util.UUID;
 
-/**
- * Central handler for all clicks and drags inside plugin-owned inventories.
- *
- * <p>The holder type ({@link PersonalityHolder.Type}) drives which action to take.
- * Every click inside a plugin inventory is cancelled regardless of slot to prevent
- * item theft. Only clicks in the top inventory (the plugin GUI) are dispatched.</p>
- */
 public final class InventoryListener implements Listener {
 
     private static final MiniMessage MM = MiniMessage.miniMessage();
-
     private final PersonalityPlugin plugin;
 
     public InventoryListener(PersonalityPlugin plugin) {
         this.plugin = plugin;
     }
 
-    // ── Click ─────────────────────────────────────────────────────
-
     @EventHandler(priority = EventPriority.HIGH)
     public void onInventoryClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player player)) return;
         if (!(event.getInventory().getHolder() instanceof PersonalityHolder holder)) return;
 
-        // Cancel ALL clicks — including those in the player's own bottom inventory —
-        // to prevent any item movement.
         event.setCancelled(true);
 
-        // Do not dispatch clicks that occurred outside the plugin GUI (e.g. player inventory row).
         Inventory clicked = event.getClickedInventory();
         if (clicked == null || !clicked.equals(event.getInventory())) return;
 
@@ -60,8 +47,6 @@ public final class InventoryListener implements Listener {
             case TOP        -> handleTopClick(player, slot);
         }
     }
-
-    // ── Drag ──────────────────────────────────────────────────────
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onInventoryDrag(InventoryDragEvent event) {
@@ -95,54 +80,58 @@ public final class InventoryListener implements Listener {
         int backSlot    = plugin.getConfig().getInt("gui.reputation-slots.back-button",    22);
 
         if (slot == backSlot) {
-            OfflinePlayer target = Bukkit.getOfflinePlayer(targetUuid);
-            ProfileGUI.open(plugin, player, target);
+            ProfileGUI.open(plugin, player, Bukkit.getOfflinePlayer(targetUuid));
             return;
         }
 
-        VoteType vote = null;
-        if (slot == likeSlot)    vote = VoteType.LIKE;
-        if (slot == dislikeSlot) vote = VoteType.DISLIKE;
-        if (vote == null) return;
+        VoteType direction = null;
+        if (slot == likeSlot)    direction = VoteType.LIKE;
+        if (slot == dislikeSlot) direction = VoteType.DISLIKE;
+        if (direction == null) return;
 
-        final VoteType finalVote = vote;
+        // Gray panes (self / cooldown) are also in these slots — ignore clicks on them
+        // by checking the item material before proceeding
+        var item = inv.getItem(slot);
+        if (item != null && item.getType() == org.bukkit.Material.GRAY_STAINED_GLASS_PANE) return;
+
+        final VoteType finalDir = direction;
         plugin.getReputationManager()
-                .castVote(player.getUniqueId(), targetUuid, finalVote)
+                .giveRep(player.getUniqueId(), targetUuid, finalDir)
                 .thenAccept(result -> Bukkit.getScheduler().runTask(plugin, () ->
-                        handleVoteResult(player, inv, targetUuid, finalVote, result)));
+                        handleRepResult(player, inv, targetUuid, finalDir, result)));
     }
 
-    private void handleVoteResult(Player player, Inventory inv, UUID targetUuid,
-                                   VoteType vote, VoteResult result) {
+    private void handleRepResult(Player player, Inventory inv, UUID targetUuid,
+                                  VoteType dir, RepResult result) {
         switch (result) {
-            case SELF_VOTE -> {
-                String msg = plugin.getConfig().getString(
-                        "messages.cannot-vote-self", "<red>You cannot vote for yourself!");
-                player.sendMessage(MM.deserialize(msg));
-            }
-            case UNCHANGED -> {
-                String msg = plugin.getConfig().getString(
-                        "messages.vote-unchanged", "<yellow>Your vote is already recorded.");
-                player.sendMessage(MM.deserialize(msg));
-            }
-            case CAST, CHANGED -> {
-                // Play sound
-                String soundKey = vote == VoteType.LIKE ? "sounds.like" : "sounds.dislike";
+            case SELF -> player.sendMessage(MM.deserialize(
+                    plugin.getConfig().getString("messages.cannot-vote-self",
+                            "<red>Нельзя оценивать самого себя!")));
+
+            case ON_COOLDOWN -> plugin.getReputationManager()
+                    .cooldownRemaining(player.getUniqueId(), targetUuid)
+                    .thenAccept(ms -> Bukkit.getScheduler().runTask(plugin, () -> {
+                        long h = ms / 3600000, m = (ms % 3600000) / 60000;
+                        player.sendMessage(MM.deserialize(
+                                "<red>Кулдаун. Осталось: <white>" + h + "ч " + m + "м"));
+                    }));
+
+            case OK -> {
+                String soundKey  = dir == VoteType.LIKE ? "sounds.like" : "sounds.dislike";
                 String soundName = plugin.getConfig().getString(soundKey,
-                        vote == VoteType.LIKE ? "ENTITY_PLAYER_LEVELUP" : "ENTITY_VILLAGER_NO");
+                        dir == VoteType.LIKE ? "ENTITY_PLAYER_LEVELUP" : "ENTITY_VILLAGER_NO");
                 try {
                     player.playSound(player.getLocation(), Sound.valueOf(soundName.toUpperCase()), 1f, 1f);
                 } catch (IllegalArgumentException ignored) {}
 
-                // Send confirmation message
-                OfflinePlayer target     = Bukkit.getOfflinePlayer(targetUuid);
-                String        targetName = target.getName() != null ? target.getName() : "Unknown";
-                String        msgKey     = vote == VoteType.LIKE ? "messages.vote-like" : "messages.vote-dislike";
-                String        msg        = plugin.getConfig().getString(msgKey, "")
-                        .replace("{player}", targetName);
-                if (!msg.isBlank()) player.sendMessage(MM.deserialize(msg));
+                String msgKey = dir == VoteType.LIKE ? "messages.vote-like" : "messages.vote-dislike";
+                String msg    = plugin.getConfig().getString(msgKey, "");
+                if (msg != null && !msg.isBlank()) {
+                    String name = Bukkit.getOfflinePlayer(targetUuid).getName();
+                    player.sendMessage(MM.deserialize(msg.replace("{player}", name != null ? name : "?")));
+                }
 
-                // Refresh the open GUI in-place — no reopen needed.
+                plugin.getReputationManager().invalidate(targetUuid);
                 ReputationGUI.refresh(plugin, player, inv, targetUuid);
             }
         }
@@ -151,8 +140,6 @@ public final class InventoryListener implements Listener {
     // ── Top ───────────────────────────────────────────────────────
 
     private void handleTopClick(Player player, int slot) {
-        if (slot == 49) { // CLOSE_SLOT
-            player.closeInventory();
-        }
+        if (slot == 49) player.closeInventory();
     }
 }

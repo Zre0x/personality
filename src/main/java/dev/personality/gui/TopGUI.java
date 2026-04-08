@@ -96,10 +96,7 @@ public final class TopGUI {
             sm.setOwningPlayer(op);
             sm.displayName(MM.deserialize("<yellow>#" + (rank + 1) + " <white>" + name));
             sm.lore(List.of(
-                    MM.deserialize("<green>Likes: <white>"    + entry.likes()),
-                    MM.deserialize("<red>Dislikes: <white>"   + entry.dislikes()),
-                    Component.empty(),
-                    MM.deserialize("<gray>Score: " + scoreColor + score)
+                    MM.deserialize("<gray>Репутация: " + scoreColor + (score >= 0 ? "+" : "") + score)
             ));
             sm.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ADDITIONAL_TOOLTIP);
             skull.setItemMeta(sm);

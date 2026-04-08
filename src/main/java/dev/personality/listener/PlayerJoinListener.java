@@ -29,5 +29,9 @@ public final class PlayerJoinListener implements Listener {
         if (firstPlayed <= 0) firstPlayed = System.currentTimeMillis();
 
         plugin.getDatabaseManager().insertFirstJoin(player.getUniqueId(), firstPlayed);
+
+        // Sync Discord reputation roles on every join (handles offline threshold changes)
+        plugin.getReputationManager().getScore(player.getUniqueId())
+                .thenAccept(score -> plugin.getDiscordSync().syncRoles(player, score));
     }
 }

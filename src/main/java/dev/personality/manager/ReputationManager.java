@@ -3,7 +3,6 @@ package dev.personality.manager;
 import dev.personality.PersonalityPlugin;
 import dev.personality.database.DatabaseManager;
 import dev.personality.model.VoteType;
-import dev.personality.util.VoteLogger;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -13,93 +12,108 @@ import java.util.concurrent.ConcurrentMap;
 /**
  * Business logic for the reputation system.
  *
- * <p>Caches reputation counts per target in a thread-safe map.
- * The cache is invalidated after every successful vote to ensure consistency.</p>
+ * Score is a cumulative integer. Players can give +1 or -1 to another player
+ * once per cooldown period (default 24 h). No persistent "one-time vote".
  */
 public final class ReputationManager {
 
     private final PersonalityPlugin plugin;
     private final DatabaseManager   db;
 
-    /** targetUuid → int[]{likes, dislikes} */
-    private final ConcurrentMap<UUID, int[]> cache = new ConcurrentHashMap<>();
+    /** Cache: targetUuid → score */
+    private final ConcurrentMap<UUID, Integer> scoreCache = new ConcurrentHashMap<>();
 
     public ReputationManager(PersonalityPlugin plugin, DatabaseManager db) {
         this.plugin = plugin;
         this.db     = db;
     }
 
-    // ── Reputation queries ────────────────────────────────────────
+    // ── Score queries ─────────────────────────────────────────────
 
-    /**
-     * Returns cached reputation counts, or fetches and caches them from the database.
-     *
-     * @return CompletableFuture containing int[]{likes, dislikes}
-     */
-    public CompletableFuture<int[]> getReputation(UUID targetUuid) {
-        int[] cached = cache.get(targetUuid);
-        if (cached != null) {
-            return CompletableFuture.completedFuture(cached);
-        }
-        return db.getReputationCounts(targetUuid).thenApply(counts -> {
-            cache.put(targetUuid, counts);
-            return counts;
+    public CompletableFuture<Integer> getScore(UUID targetUuid) {
+        Integer cached = scoreCache.get(targetUuid);
+        if (cached != null) return CompletableFuture.completedFuture(cached);
+        return db.getScore(targetUuid).thenApply(score -> {
+            scoreCache.put(targetUuid, score);
+            return score;
         });
     }
 
-    /**
-     * Removes the cached reputation for the given target, forcing a fresh DB read next time.
-     */
     public void invalidate(UUID targetUuid) {
-        cache.remove(targetUuid);
+        scoreCache.remove(targetUuid);
     }
 
-    // ── Vote logic ────────────────────────────────────────────────
+    // ── Cooldown helpers ──────────────────────────────────────────
+
+    private long cooldownMs() {
+        return plugin.getConfig().getLong("reputation.cooldown-seconds", 86400) * 1000L;
+    }
+
+    /** Returns ms remaining on cooldown, or 0 if available. */
+    public CompletableFuture<Long> cooldownRemaining(UUID giver, UUID target) {
+        return db.getLastRepTime(giver, target).thenApply(last -> {
+            long elapsed = System.currentTimeMillis() - last;
+            long remaining = cooldownMs() - elapsed;
+            return Math.max(0, remaining);
+        });
+    }
+
+    // ── Give rep ──────────────────────────────────────────────────
+
+    public enum RepResult { OK, SELF, ON_COOLDOWN }
 
     /**
-     * Casts or changes a vote from {@code voterUuid} towards {@code targetUuid}.
-     *
-     * <p>Rules enforced here:</p>
-     * <ul>
-     *   <li>Players cannot vote for themselves.</li>
-     *   <li>Submitting the same vote twice is a no-op ({@link VoteResult#UNCHANGED}).</li>
-     *   <li>Submitting a different vote replaces the previous one.</li>
-     * </ul>
+     * Give +1 (LIKE) or -1 (DISLIKE) reputation from giver to target.
+     * Checks cooldown; applies score; triggers Discord sync.
      */
-    public CompletableFuture<VoteResult> castVote(UUID voterUuid, UUID targetUuid, VoteType newVote) {
-        if (voterUuid.equals(targetUuid)) {
-            return CompletableFuture.completedFuture(VoteResult.SELF_VOTE);
+    public CompletableFuture<RepResult> giveRep(UUID giverUuid, UUID targetUuid, VoteType direction) {
+        if (giverUuid.equals(targetUuid)) {
+            return CompletableFuture.completedFuture(RepResult.SELF);
         }
 
-        return db.getVote(targetUuid, voterUuid).thenCompose(existing -> {
-            if (existing == newVote) {
-                return CompletableFuture.completedFuture(VoteResult.UNCHANGED);
+        return db.getLastRepTime(giverUuid, targetUuid).thenCompose(last -> {
+            long elapsed = System.currentTimeMillis() - last;
+            if (elapsed < cooldownMs()) {
+                return CompletableFuture.completedFuture(RepResult.ON_COOLDOWN);
             }
 
-            return db.upsertVote(targetUuid, voterUuid, newVote).thenApply(ignored -> {
-                // Invalidate so the next getReputation() fetches fresh counts.
-                invalidate(targetUuid);
+            int delta = direction == VoteType.LIKE ? 1 : -1;
 
-                if (plugin.getConfig().getBoolean("vote-log.enabled", false)) {
-                    String file = plugin.getConfig().getString("vote-log.file", "vote-log.txt");
-                    VoteLogger.log(plugin, file, voterUuid, targetUuid, newVote);
-                }
-
-                return existing == null ? VoteResult.CAST : VoteResult.CHANGED;
-            });
+            return db.addScore(targetUuid, delta)
+                    .thenCompose(v -> db.setLastRepTime(giverUuid, targetUuid,
+                            System.currentTimeMillis(), direction))
+                    .thenCompose(v -> {
+                        invalidate(targetUuid);
+                        return db.getScore(targetUuid);
+                    })
+                    .thenApply(newScore -> {
+                        scoreCache.put(targetUuid, newScore);
+                        // Discord sync — runs on calling thread (async is fine here)
+                        plugin.getDiscordSync().syncRolesAsync(targetUuid, newScore);
+                        return RepResult.OK;
+                    });
         });
     }
 
-    // ── Result enum ───────────────────────────────────────────────
+    // ── Admin operations ──────────────────────────────────────────
 
-    public enum VoteResult {
-        /** Voter tried to vote for themselves. */
-        SELF_VOTE,
-        /** Voter already has this exact vote — no change. */
-        UNCHANGED,
-        /** A brand-new vote was recorded. */
-        CAST,
-        /** An existing vote was changed to the new type. */
-        CHANGED
+    public CompletableFuture<Void> adminSet(UUID uuid, int score) {
+        invalidate(uuid);
+        return db.setScore(uuid, score).thenRun(() -> {
+            scoreCache.put(uuid, score);
+            plugin.getDiscordSync().syncRolesAsync(uuid, score);
+        });
+    }
+
+    public CompletableFuture<Void> adminAdd(UUID uuid, int delta) {
+        return getScore(uuid).thenCompose(cur -> adminSet(uuid, cur + delta));
+    }
+
+    // ── Legacy compat (used by ProfileGUI — returns int[]{score,0}) ──
+
+    /** @deprecated Use {@link #getScore(UUID)} directly. */
+    @Deprecated
+    public CompletableFuture<int[]> getReputation(UUID targetUuid) {
+        return getScore(targetUuid).thenApply(s -> new int[]{s, 0});
     }
 }

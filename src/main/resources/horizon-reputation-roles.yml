@@ -1,0 +1,55 @@
+# horizon-reputation-roles.yml
+# Maps reputation thresholds to Discord role IDs and server perks.
+# Positive thresholds grant roles; negative thresholds grant "negative" roles.
+# When a player's rep drops below a positive threshold, the role is removed.
+# When a player's rep rises above a negative threshold, the negative role is removed.
+#
+# Fields per entry:
+#   discord-role-id : Discord snowflake ID of the role to assign
+#   luckperms-group : (optional) LP group to add the player to
+#   tab-icon        : (optional) character/symbol shown in TAB list
+#   prefix          : (optional) chat prefix override (MiniMessage)
+
+thresholds:
+  positive:
+    10:
+      discord-role-id: "REPLACE_ROLE_ID"
+      tab-icon: "★"
+    50:
+      discord-role-id: "REPLACE_ROLE_ID"
+      tab-icon: "★★"
+    100:
+      discord-role-id: "REPLACE_ROLE_ID"
+      tab-icon: "★★★"
+      prefix: "<gold>[★★★]</gold> "
+    200:
+      discord-role-id: "REPLACE_ROLE_ID"
+      tab-icon: "✦✦"
+      prefix: "<yellow>[✦✦]</yellow> "
+    500:
+      discord-role-id: "REPLACE_ROLE_ID"
+      tab-icon: "✦✦✦"
+      prefix: "<#e8a045>[✦✦✦]</#e8a045> "
+    1000:
+      discord-role-id: "REPLACE_ROLE_ID"
+      tab-icon: "✦✦✦✦"
+      prefix: "<#e8a045><bold>[ЛЕГЕНДА]</bold></#e8a045> "
+
+  negative:
+    -10:
+      discord-role-id: "REPLACE_ROLE_ID"
+      tab-icon: "✗"
+    -50:
+      discord-role-id: "REPLACE_ROLE_ID"
+      tab-icon: "✗✗"
+    -100:
+      discord-role-id: "REPLACE_ROLE_ID"
+      tab-icon: "✗✗✗"
+      prefix: "<red>[✗✗✗]</red> "
+    -200:
+      discord-role-id: "REPLACE_ROLE_ID"
+    -500:
+      discord-role-id: "REPLACE_ROLE_ID"
+    -1000:
+      discord-role-id: "REPLACE_ROLE_ID"
+      prefix: "<dark_red>[ИЗГОЙ]</dark_red> "

@@ -69,6 +69,11 @@ messages:
   player-not-found: "<red>Player not found: <white>{player}"
   no-permission:    "<red>You don't have permission to do this."
 
+# ── Reputation ───────────────────────────────────────────────────
+reputation:
+  # Cooldown in seconds before the same player can give rep to the same target again (default 24h)
+  cooldown-seconds: 86400
+
 # ── Vote Logging ─────────────────────────────────────────────────
 vote-log:
   enabled: false

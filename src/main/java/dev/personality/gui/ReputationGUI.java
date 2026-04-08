@@ -1,7 +1,6 @@
 package dev.personality.gui;
 
 import dev.personality.PersonalityPlugin;
-import dev.personality.model.VoteType;
 import dev.personality.util.ItemBuilder;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -17,22 +16,19 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * 27-slot reputation GUI where a viewer can like or dislike a target player.
+ * 27-slot reputation GUI where a viewer can give +1 or -1 rep to a target player.
  *
  * <p>Default slot layout:</p>
  * <pre>
  *  [ ][ ][ ][ ][ ][ ][ ][ ][ ]
- *  [ ][+][ ][ ][V][ ][-][ ][ ]
+ *  [ ][+][ ][ ][S][ ][-][ ][ ]
  *  [ ][ ][ ][ ][B][ ][ ][ ][ ]
  *
- *  +  = Like button (green pane)
- *  -  = Dislike button (red pane)
- *  V  = Current vote indicator
- *  B  = Back button (barrier)
+ *  +  = +1 rep button (green pane)  — slot 11
+ *  S  = Current score indicator     — slot 13
+ *  -  = -1 rep button (red pane)    — slot 15
+ *  B  = Back button                  — slot 22
  * </pre>
- *
- * <p>After a vote is cast the GUI is refreshed in-place without reopening it,
- * providing immediate visual feedback.</p>
  */
 public final class ReputationGUI {
 
@@ -41,25 +37,22 @@ public final class ReputationGUI {
 
     private ReputationGUI() {}
 
-    // ── Public API ────────────────────────────────────────────────
-
-    /**
-     * Opens the reputation GUI for {@code viewer} targeting {@code target}.
-     */
     public static void open(PersonalityPlugin plugin, Player viewer, OfflinePlayer target) {
         UUID   targetUuid = target.getUniqueId();
         String targetName = target.getName() != null ? target.getName() : "Unknown";
 
-        CompletableFuture<int[]>    repFuture  = plugin.getReputationManager().getReputation(targetUuid);
-        CompletableFuture<VoteType> voteFuture = plugin.getDatabaseManager().getVote(targetUuid, viewer.getUniqueId());
+        CompletableFuture<Integer> scoreFuture    = plugin.getReputationManager().getScore(targetUuid);
+        CompletableFuture<Long>    cdFuture        = plugin.getReputationManager().cooldownRemaining(
+                viewer.getUniqueId(), targetUuid);
 
-        CompletableFuture.allOf(repFuture, voteFuture).thenRun(() -> {
-            int[]    counts      = repFuture.join();
-            VoteType currentVote = voteFuture.join();
+        CompletableFuture.allOf(scoreFuture, cdFuture).thenRun(() -> {
+            int  score     = scoreFuture.join();
+            long cdMs      = cdFuture.join();
 
             Bukkit.getScheduler().runTask(plugin, () -> {
                 if (!viewer.isOnline()) return;
-                Inventory inv = buildInventory(plugin, targetName, target.getUniqueId(), counts, currentVote);
+                Inventory inv = buildInventory(plugin, targetName, targetUuid, score, cdMs,
+                        viewer.getUniqueId().equals(targetUuid));
                 viewer.openInventory(inv);
             });
         }).exceptionally(ex -> {
@@ -68,26 +61,19 @@ public final class ReputationGUI {
         });
     }
 
-    /**
-     * Refreshes the interactive items inside an already-open reputation inventory.
-     * This is called after a successful vote to update counts and the current-vote indicator
-     * without reopening the inventory, giving the player instant feedback.
-     */
     public static void refresh(PersonalityPlugin plugin, Player viewer, Inventory inv, UUID targetUuid) {
-        // Cache was invalidated by ReputationManager before this method is called,
-        // so getReputation() will fetch fresh data from the database.
-        CompletableFuture<int[]>    repFuture  = plugin.getReputationManager().getReputation(targetUuid);
-        CompletableFuture<VoteType> voteFuture = plugin.getDatabaseManager().getVote(targetUuid, viewer.getUniqueId());
+        CompletableFuture<Integer> scoreFuture = plugin.getReputationManager().getScore(targetUuid);
+        CompletableFuture<Long>    cdFuture    = plugin.getReputationManager().cooldownRemaining(
+                viewer.getUniqueId(), targetUuid);
 
-        CompletableFuture.allOf(repFuture, voteFuture).thenRun(() -> {
-            int[]    counts      = repFuture.join();
-            VoteType currentVote = voteFuture.join();
+        CompletableFuture.allOf(scoreFuture, cdFuture).thenRun(() -> {
+            int  score = scoreFuture.join();
+            long cdMs  = cdFuture.join();
 
             Bukkit.getScheduler().runTask(plugin, () -> {
-                // Guard: only update if the player still has this inventory open.
                 if (!viewer.isOnline()) return;
                 if (!viewer.getOpenInventory().getTopInventory().equals(inv)) return;
-                populateVoteItems(plugin, inv, counts, currentVote);
+                populateItems(plugin, inv, score, cdMs, viewer.getUniqueId().equals(targetUuid));
             });
         });
     }
@@ -95,7 +81,7 @@ public final class ReputationGUI {
     // ── Builder ───────────────────────────────────────────────────
 
     private static Inventory buildInventory(PersonalityPlugin plugin, String targetName,
-                                             UUID targetUuid, int[] counts, VoteType currentVote) {
+                                             UUID targetUuid, int score, long cdMs, boolean isSelf) {
         String rawTitle = plugin.getConfig()
                 .getString("gui.reputation-title", "<dark_gray>Reputation: <white>{player}")
                 .replace("{player}", targetName);
@@ -104,82 +90,82 @@ public final class ReputationGUI {
         Inventory inv = Bukkit.createInventory(holder, GUI_SIZE, MM.deserialize(rawTitle));
         holder.setInventory(inv);
 
-        // Fill all slots with glass first.
         ItemStack filler = new ItemBuilder(Material.GRAY_STAINED_GLASS_PANE)
-                .name(Component.empty())
-                .hideFlags()
-                .build();
+                .name(Component.empty()).hideFlags().build();
         for (int i = 0; i < GUI_SIZE; i++) inv.setItem(i, filler);
 
-        // Back button
         int backSlot = plugin.getConfig().getInt("gui.reputation-slots.back-button", 22);
         inv.setItem(backSlot, new ItemBuilder(Material.BARRIER)
-                .name(MM.deserialize("<red>Back"))
-                .lore(List.of(MM.deserialize("<gray>Return to profile")))
-                .hideFlags()
-                .build());
+                .name(MM.deserialize("<red>Назад"))
+                .lore(List.of(MM.deserialize("<gray>Вернуться в профиль")))
+                .hideFlags().build());
 
-        // Interactive vote items
-        populateVoteItems(plugin, inv, counts, currentVote);
-
+        populateItems(plugin, inv, score, cdMs, isSelf);
         return inv;
     }
 
-    /**
-     * Sets (or refreshes) the three interactive items: like button, dislike button,
-     * and the current-vote indicator. Safe to call multiple times on the same inventory.
-     */
-    static void populateVoteItems(PersonalityPlugin plugin, Inventory inv,
-                                   int[] counts, VoteType currentVote) {
-        int likes    = counts[0];
-        int dislikes = counts[1];
-
+    static void populateItems(PersonalityPlugin plugin, Inventory inv,
+                               int score, long cdMs, boolean isSelf) {
         int likeSlot    = plugin.getConfig().getInt("gui.reputation-slots.like-button",    11);
         int dislikeSlot = plugin.getConfig().getInt("gui.reputation-slots.dislike-button", 15);
         int cvSlot      = plugin.getConfig().getInt("gui.reputation-slots.current-vote",   13);
 
-        // ── Like button ───────────────────────────────────────────
-        boolean isLiked = currentVote == VoteType.LIKE;
-        List<Component> likeLore = List.of(
-                MM.deserialize("<gray>Total: <white>" + likes),
-                Component.empty(),
-                isLiked
-                        ? MM.deserialize("<green><bold>✔ Your current vote")
-                        : MM.deserialize("<gray>Click to like this player")
-        );
-        inv.setItem(likeSlot, new ItemBuilder(Material.LIME_STAINED_GLASS_PANE)
-                .name(MM.deserialize(isLiked ? "<green><bold>Like" : "<green>Like"))
-                .lore(likeLore)
-                .hideFlags()
-                .build());
+        String scoreColor = score >= 0 ? "<green>" : "<red>";
+        String scoreStr   = (score >= 0 ? "+" : "") + score;
 
-        // ── Dislike button ────────────────────────────────────────
-        boolean isDisliked = currentVote == VoteType.DISLIKE;
-        List<Component> dislikeLore = List.of(
-                MM.deserialize("<gray>Total: <white>" + dislikes),
-                Component.empty(),
-                isDisliked
-                        ? MM.deserialize("<red><bold>✔ Your current vote")
-                        : MM.deserialize("<gray>Click to dislike this player")
-        );
-        inv.setItem(dislikeSlot, new ItemBuilder(Material.RED_STAINED_GLASS_PANE)
-                .name(MM.deserialize(isDisliked ? "<red><bold>Dislike" : "<red>Dislike"))
-                .lore(dislikeLore)
-                .hideFlags()
-                .build());
+        // Score display
+        inv.setItem(cvSlot, new ItemBuilder(Material.NETHER_STAR)
+                .name(MM.deserialize("<yellow>Репутация"))
+                .lore(List.of(MM.deserialize(scoreColor + scoreStr)))
+                .hideFlags().build());
 
-        // ── Current vote indicator ────────────────────────────────
-        String cvText;
-        if (currentVote == null) {
-            cvText = "<gray>No vote yet";
+        boolean onCooldown = cdMs > 0;
+        String cdText = onCooldown ? formatCooldown(cdMs) : null;
+
+        // +1 button
+        if (isSelf) {
+            inv.setItem(likeSlot, new ItemBuilder(Material.GRAY_STAINED_GLASS_PANE)
+                    .name(MM.deserialize("<dark_gray>+1 Репутация"))
+                    .lore(List.of(MM.deserialize("<gray>Нельзя оценивать себя")))
+                    .hideFlags().build());
+        } else if (onCooldown) {
+            inv.setItem(likeSlot, new ItemBuilder(Material.GRAY_STAINED_GLASS_PANE)
+                    .name(MM.deserialize("<dark_gray>+1 Репутация"))
+                    .lore(List.of(MM.deserialize("<red>Кулдаун: <white>" + cdText)))
+                    .hideFlags().build());
         } else {
-            cvText = currentVote == VoteType.LIKE ? "<green>Liked" : "<red>Disliked";
+            inv.setItem(likeSlot, new ItemBuilder(Material.LIME_STAINED_GLASS_PANE)
+                    .name(MM.deserialize("<green><bold>+1 Репутация"))
+                    .lore(List.of(MM.deserialize("<gray>Нажми, чтобы повысить репутацию")))
+                    .hideFlags().build());
         }
 
-        inv.setItem(cvSlot, new ItemBuilder(Material.PAPER)
-                .name(MM.deserialize("<yellow>Your Vote"))
-                .lore(List.of(MM.deserialize(cvText)))
-                .hideFlags()
-                .build());
+        // -1 button
+        if (isSelf) {
+            inv.setItem(dislikeSlot, new ItemBuilder(Material.GRAY_STAINED_GLASS_PANE)
+                    .name(MM.deserialize("<dark_gray>-1 Репутация"))
+                    .lore(List.of(MM.deserialize("<gray>Нельзя оценивать себя")))
+                    .hideFlags().build());
+        } else if (onCooldown) {
+            inv.setItem(dislikeSlot, new ItemBuilder(Material.GRAY_STAINED_GLASS_PANE)
+                    .name(MM.deserialize("<dark_gray>-1 Репутация"))
+                    .lore(List.of(MM.deserialize("<red>Кулдаун: <white>" + cdText)))
+                    .hideFlags().build());
+        } else {
+            inv.setItem(dislikeSlot, new ItemBuilder(Material.RED_STAINED_GLASS_PANE)
+                    .name(MM.deserialize("<red><bold>-1 Репутация"))
+                    .lore(List.of(MM.deserialize("<gray>Нажми, чтобы понизить репутацию")))
+                    .hideFlags().build());
+        }
+    }
+
+    private static String formatCooldown(long ms) {
+        long totalSec = ms / 1000;
+        long h = totalSec / 3600;
+        long m = (totalSec % 3600) / 60;
+        long s = totalSec % 60;
+        if (h > 0) return h + "ч " + m + "м";
+        if (m > 0) return m + "м " + s + "с";
+        return s + "с";
     }
 }

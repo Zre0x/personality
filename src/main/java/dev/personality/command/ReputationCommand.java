@@ -68,9 +68,7 @@ public final class ReputationCommand implements CommandExecutor, TabCompleter {
 
                 sender.sendMessage(MM.deserialize(
                         "<yellow>#" + (i + 1) + " <white>" + name
-                        + "  <gray>score: " + color + score
-                        + "  <green>+" + entry.likes()
-                        + " <red>-" + entry.dislikes()
+                        + "  <gray>репутация: " + color + (score >= 0 ? "+" : "") + score
                 ));
             }
             sender.sendMessage(MM.deserialize("<gold><bold>════════════════════════════════"));
