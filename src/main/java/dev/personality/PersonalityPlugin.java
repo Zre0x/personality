@@ -8,6 +8,7 @@ import dev.personality.hooks.DiscordSyncHook;
 import dev.personality.listener.InventoryListener;
 import dev.personality.listener.PlayerInteractEntityListener;
 import dev.personality.listener.PlayerJoinListener;
+import dev.personality.manager.FriendManager;
 import dev.personality.manager.ReputationManager;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -16,6 +17,7 @@ public final class PersonalityPlugin extends JavaPlugin {
 
     private DatabaseManager   databaseManager;
     private ReputationManager reputationManager;
+    private FriendManager     friendManager;
     private DiscordSyncHook   discordSync;
 
     @Override
@@ -28,6 +30,7 @@ public final class PersonalityPlugin extends JavaPlugin {
 
         discordSync       = new DiscordSyncHook(this);
         reputationManager = new ReputationManager(this, databaseManager);
+        friendManager     = new FriendManager(this, databaseManager);
 
         var pm = getServer().getPluginManager();
         pm.registerEvents(new PlayerJoinListener(this),           this);
@@ -60,5 +63,6 @@ public final class PersonalityPlugin extends JavaPlugin {
 
     public DatabaseManager getDatabaseManager()     { return databaseManager; }
     public ReputationManager getReputationManager() { return reputationManager; }
+    public FriendManager getFriendManager()         { return friendManager; }
     public DiscordSyncHook getDiscordSync()         { return discordSync; }
 }

@@ -17,6 +17,8 @@ gui:
     playtime:           11
     reputation:         13
     discord:            15
+    achievements:       12
+    friends-button:     16
     reputation-button:  22
 
   # Slot indices for the 27-slot Reputation inventory.
@@ -31,13 +33,14 @@ stats:
   show-first-join: true
   show-playtime:   true
   show-reputation: true
-  show-discord:    true
+  show-discord:       true
+  show-achievements:  true
 
 # ── PlaceholderAPI ───────────────────────────────────────────────
 placeholder:
   # Placeholder used to resolve the player's linked Discord username.
   # Requires DiscordSRV + PlaceholderAPI to be installed.
-  discord: "%discordsrv_username%"
+  discord: "%discordsrv_user%"
 
 # ── Mask Detection ───────────────────────────────────────────────
 # If a player is "masked", their profile cannot be opened.
@@ -68,6 +71,7 @@ messages:
   vote-unchanged:   "<yellow>Your vote is already recorded."
   player-not-found: "<red>Player not found: <white>{player}"
   no-permission:    "<red>You don't have permission to do this."
+  friend-joined:    "<green>➤ <white>{player} <green>вошёл на сервер"
 
 # ── Reputation ───────────────────────────────────────────────────
 reputation:

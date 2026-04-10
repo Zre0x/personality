@@ -33,5 +33,8 @@ public final class PlayerJoinListener implements Listener {
         // Sync Discord reputation roles on every join (handles offline threshold changes)
         plugin.getReputationManager().getScore(player.getUniqueId())
                 .thenAccept(score -> plugin.getDiscordSync().syncRoles(player, score));
+
+        // Notify online friends about this player joining
+        plugin.getFriendManager().notifyFriendsOnJoin(player);
     }
 }

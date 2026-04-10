@@ -45,7 +45,7 @@ public final class PersonalityCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length == 0) {
-            player.sendMessage(MM.deserialize("<red>Usage: /" + label + " <player>"));
+            ProfileGUI.open(plugin, player, player);
             return true;
         }
 

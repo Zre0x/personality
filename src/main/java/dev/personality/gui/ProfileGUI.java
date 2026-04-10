@@ -19,6 +19,7 @@ import org.bukkit.inventory.meta.SkullMeta;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 27-slot profile GUI showing a player's statistics and a button to open the reputation menu.
@@ -54,22 +55,29 @@ public final class ProfileGUI {
         UUID   targetUuid = target.getUniqueId();
         String targetName = target.getName() != null ? target.getName() : "Unknown";
 
-        CompletableFuture<int[]> repFuture = plugin.getReputationManager().getReputation(targetUuid);
-        CompletableFuture<Long>  fjFuture  = plugin.getDatabaseManager().getFirstJoin(targetUuid);
+        CompletableFuture<int[]>    repFuture    = plugin.getReputationManager().getReputation(targetUuid);
+        CompletableFuture<Long>     fjFuture     = plugin.getDatabaseManager().getFirstJoin(targetUuid);
+        CompletableFuture<Boolean>  friendFuture = plugin.getFriendManager().areFriends(viewer.getUniqueId(), targetUuid);
 
-        CompletableFuture.allOf(repFuture, fjFuture).thenRun(() -> {
-            int[] counts   = repFuture.join();
-            long  firstJoin = fjFuture.join();
+        CompletableFuture.allOf(repFuture, fjFuture, friendFuture).thenRun(() -> {
+            int[]   counts    = repFuture.join();
+            long    firstJoin = fjFuture.join();
+            boolean isFriend  = friendFuture.join();
 
-            // Fall back to Bukkit's tracked value if DB has no entry yet.
             if (firstJoin <= 0) firstJoin = target.getFirstPlayed();
 
-            final long resolvedFirstJoin = firstJoin;
+            final long    resolvedFirstJoin = firstJoin;
+            final boolean resolvedFriend    = isFriend;
 
             Bukkit.getScheduler().runTask(plugin, () -> {
                 if (!viewer.isOnline()) return;
 
-                Inventory inv = buildInventory(plugin, target, targetName, counts, resolvedFirstJoin);
+                // Resolve Discord on main thread (PAPI may need online player context)
+                Player onlineTarget = Bukkit.getPlayer(targetUuid);
+                String discord = resolveDiscord(plugin, target, onlineTarget);
+
+                Inventory inv = buildInventory(plugin, viewer, target, targetName, counts,
+                        resolvedFirstJoin, discord, resolvedFriend);
                 viewer.openInventory(inv);
                 playSound(viewer, plugin.getConfig().getString("sounds.open-profile", "BLOCK_CHEST_OPEN"));
             });
@@ -79,10 +87,23 @@ public final class ProfileGUI {
         });
     }
 
+    private static String resolveDiscord(PersonalityPlugin plugin, OfflinePlayer target, Player onlineTarget) {
+        String placeholder = plugin.getConfig().getString("placeholder.discord", "%discordsrv_user%");
+        // Prefer online resolution — DiscordSRV PAPI works better with online players
+        if (onlineTarget != null) {
+            String result = PlaceholderUtil.resolve(plugin, onlineTarget, placeholder, "");
+            if (!result.isBlank()) return result;
+        }
+        String result = PlaceholderUtil.resolveOffline(plugin, target, placeholder, "");
+        return result.isBlank() ? "Не привязан" : result;
+    }
+
     // ── Builder ───────────────────────────────────────────────────
 
-    private static Inventory buildInventory(PersonalityPlugin plugin, OfflinePlayer target,
-                                             String targetName, int[] counts, long firstJoin) {
+    private static Inventory buildInventory(PersonalityPlugin plugin, Player viewer,
+                                             OfflinePlayer target, String targetName,
+                                             int[] counts, long firstJoin,
+                                             String discord, boolean isFriend) {
         String rawTitle = plugin.getConfig()
                 .getString("gui.profile-title", "<dark_gray>Profile: <white>{player}")
                 .replace("{player}", targetName);
@@ -144,8 +165,6 @@ public final class ProfileGUI {
         // ── Discord ───────────────────────────────────────────────
         if (plugin.getConfig().getBoolean("stats.show-discord", true)) {
             int slot = plugin.getConfig().getInt("gui.profile-slots.discord", 15);
-            String placeholder = plugin.getConfig().getString("placeholder.discord", "%discordsrv_username%");
-            String discord     = PlaceholderUtil.resolveOffline(plugin, target, placeholder, "Not linked");
             inv.setItem(slot, new ItemBuilder(Material.BOOK)
                     .name(MM.deserialize("<aqua>Discord"))
                     .lore(List.of(MM.deserialize("<white>" + discord)))
@@ -153,17 +172,56 @@ public final class ProfileGUI {
                     .build());
         }
 
-        // ── Open reputation menu button ───────────────────────────
+        // ── Achievements ──────────────────────────────────────────
+        if (plugin.getConfig().getBoolean("stats.show-achievements", true)) {
+            int slot = plugin.getConfig().getInt("gui.profile-slots.achievements", 12);
+            int done = countAdvancementsDone(target);
+            inv.setItem(slot, new ItemBuilder(Material.GOLDEN_APPLE)
+                    .name(MM.deserialize("<gold>Достижения"))
+                    .lore(List.of(MM.deserialize("<yellow>" + done + " <gray>выполнено")))
+                    .hideFlags()
+                    .build());
+        }
+
+        // ── Friends button (only when viewing someone else) ───────
+        boolean isSelf = viewer.getUniqueId().equals(target.getUniqueId());
+        int friendSlot = plugin.getConfig().getInt("gui.profile-slots.friends-button", 16);
+        if (isSelf) {
+            inv.setItem(friendSlot, new ItemBuilder(Material.PLAYER_HEAD)
+                    .name(MM.deserialize("<green>Друзья"))
+                    .lore(List.of(MM.deserialize("<gray>Открыть список друзей")))
+                    .hideFlags()
+                    .build());
+        } else {
+            Material friendMat = isFriend ? Material.LIME_DYE : Material.GRAY_DYE;
+            String friendLabel = isFriend ? "<red>Убрать из друзей" : "<green>Добавить в друзья";
+            inv.setItem(friendSlot, new ItemBuilder(friendMat)
+                    .name(MM.deserialize(friendLabel))
+                    .hideFlags()
+                    .build());
+        }
+
+        // ── Reputation menu button ────────────────────────────────
         int repSlot = plugin.getConfig().getInt("gui.profile-slots.reputation-button", 22);
         inv.setItem(repSlot, new ItemBuilder(Material.EXPERIENCE_BOTTLE)
-                .name(MM.deserialize("<gold>Rate Player"))
-                .lore(List.of(
-                        MM.deserialize("<gray>Click to open the reputation menu")
-                ))
+                .name(MM.deserialize("<gold>Оценить игрока"))
+                .lore(List.of(MM.deserialize("<gray>Открыть меню репутации")))
                 .hideFlags()
                 .build());
 
         return inv;
+    }
+
+    private static int countAdvancementsDone(OfflinePlayer target) {
+        Player online = target.getPlayer();
+        if (online == null) return 0;
+        int count = 0;
+        for (var it = Bukkit.advancementIterator(); it.hasNext(); ) {
+            var adv = it.next();
+            var progress = online.getAdvancementProgress(adv);
+            if (progress.isDone()) count++;
+        }
+        return count;
     }
 
     private static ItemStack buildSkull(OfflinePlayer target, String displayName) {

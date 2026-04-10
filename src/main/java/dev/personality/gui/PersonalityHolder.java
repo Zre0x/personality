@@ -19,7 +19,8 @@ public final class PersonalityHolder implements InventoryHolder {
     public enum Type {
         PROFILE,
         REPUTATION,
-        TOP
+        TOP,
+        FRIENDS
     }
 
     private final Type type;

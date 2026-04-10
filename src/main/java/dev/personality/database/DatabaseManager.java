@@ -85,6 +85,19 @@ public final class DatabaseManager {
                 )
             """);
 
+            // Friends (bidirectional — stored as min:max pair)
+            stmt.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS friends (
+                    uuid_a TEXT NOT NULL,
+                    uuid_b TEXT NOT NULL,
+                    since  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+                    PRIMARY KEY (uuid_a, uuid_b)
+                )
+            """);
+            stmt.executeUpdate(
+                "CREATE INDEX IF NOT EXISTS idx_friends_b ON friends (uuid_b)"
+            );
+
             // Legacy table kept for schema compatibility — not used for logic anymore
             stmt.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS reputation (
@@ -244,6 +257,56 @@ public final class DatabaseManager {
                 plugin.getLogger().log(Level.SEVERE, "getTopPlayers failed", e);
             }
             return list;
+        }, executor);
+    }
+
+    // ── Friends ───────────────────────────────────────────────────
+
+    private static String minUuid(UUID a, UUID b) { return a.compareTo(b) <= 0 ? a.toString() : b.toString(); }
+    private static String maxUuid(UUID a, UUID b) { return a.compareTo(b) <= 0 ? b.toString() : a.toString(); }
+
+    public CompletableFuture<List<UUID>> getFriends(UUID uuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            List<UUID> list = new ArrayList<>();
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT uuid_a, uuid_b FROM friends WHERE uuid_a = ? OR uuid_b = ?")) {
+                String s = uuid.toString();
+                ps.setString(1, s); ps.setString(2, s);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        UUID a = UUID.fromString(rs.getString("uuid_a"));
+                        UUID b = UUID.fromString(rs.getString("uuid_b"));
+                        list.add(a.equals(uuid) ? b : a);
+                    }
+                }
+            } catch (SQLException e) {
+                plugin.getLogger().log(Level.SEVERE, "getFriends failed", e);
+            }
+            return list;
+        }, executor);
+    }
+
+    public CompletableFuture<Void> addFriend(UUID a, UUID b) {
+        return CompletableFuture.runAsync(() -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "INSERT OR IGNORE INTO friends (uuid_a, uuid_b) VALUES (?, ?)")) {
+                ps.setString(1, minUuid(a, b)); ps.setString(2, maxUuid(a, b));
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                plugin.getLogger().log(Level.SEVERE, "addFriend failed", e);
+            }
+        }, executor);
+    }
+
+    public CompletableFuture<Void> removeFriend(UUID a, UUID b) {
+        return CompletableFuture.runAsync(() -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "DELETE FROM friends WHERE uuid_a = ? AND uuid_b = ?")) {
+                ps.setString(1, minUuid(a, b)); ps.setString(2, maxUuid(a, b));
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                plugin.getLogger().log(Level.SEVERE, "removeFriend failed", e);
+            }
         }, executor);
     }
 
